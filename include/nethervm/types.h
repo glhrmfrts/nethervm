@@ -17,7 +17,7 @@
 #define	G_EDICT(o)		((edict_t *)((byte *)qcvm->edicts+ *(int *)&qcvm->globals[o]))
 #define G_EDICTNUM(o)		NUM_FOR_EDICT(G_EDICT(o))
 #define	G_VECTOR(o)		(&qcvm->globals[o])
-#define	G_STRING(o)		(PR_GetString(qcvm, *(string_t *)&qcvm->globals[o]))
+#define	G_STRING(o)		(nvmGetString(qcvm, *(string_t *)&qcvm->globals[o]))
 #define	G_FUNCTION(o)		(*(func_t *)&qcvm->globals[o])
 
 #define G_VECTORSET(r,x,y,z) do{G_FLOAT((r)+0) = x; G_FLOAT((r)+1) = y;G_FLOAT((r)+2) = z;}while(0)
@@ -25,7 +25,7 @@
 #define	E_FLOAT(e,o)		(((float*)&e->v)[o])
 #define	E_INT(e,o)		(*(int *)&((float*)&e->v)[o])
 #define	E_VECTOR(e,o)		(&((float*)&e->v)[o])
-#define	E_STRING(e,o)		(PR_GetString(qcvm, *(string_t *)&((float*)&e->v)[o]))
+#define	E_STRING(e,o)		(nvmGetString(qcvm, *(string_t *)&((float*)&e->v)[o]))
 
 typedef struct NVM_s NVM;
 
@@ -160,6 +160,7 @@ typedef struct NVM_s
     ErrorCallback error_callback;
     PrintCallback print_callback;
     int auto_ext_builtin_number;
+	void* user_data;
 } NVM;
 
 #endif

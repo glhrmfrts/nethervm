@@ -5,7 +5,9 @@
 
 NVM* nvmCreateVM(AllocCallback acb, FreeCallback fcb, PrintCallback pcb, ErrorCallback ecb);
 
-void nvmAddBuiltin(NVM* qcvm, int num, const char* name, BuiltinFunction builtin);
+void nvmDestroyVM(NVM* vm);
+
+void nvmAddExtBuiltin(NVM* qcvm, int num, const char* name, BuiltinFunction builtin);
 
 void nvmLoadBuiltins(NVM* vm, BuiltinFunction* builtins, size_t num_builtins);
 
@@ -16,6 +18,8 @@ int nvmFindFunction(NVM* vm, const char* name);
 int nvmFindGlobal(NVM* vm, const char* name);
 
 int nvmFindField(NVM* vm, const char* name);
+
+const char* nvmGetString(NVM* vm, int str_ofs);
 
 void nvmExecuteFunction(NVM* vm, int func_ofs);
 

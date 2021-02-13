@@ -8,7 +8,7 @@
 
 static const char* PR_GetString(NVM* qcvm, int ofs);
 
-static void PR_SetEngineString(NVM* vm, const char* str);
+static int PR_SetEngineString(NVM* vm, const char* str);
 
 static short LittleShort(short s)
 {
@@ -239,11 +239,23 @@ NVM* nvmCreateVM(AllocCallback acb, FreeCallback fcb, PrintCallback pcb, ErrorCa
     vm->print_callback = pcb;
     vm->error_callback = ecb;
     vm->auto_ext_builtin_number = MAX_BUILTINS - 1;
+	vm->numbuiltins = MAX_BUILTINS;
     return vm;
 }
 
-void nvmAddBuiltin(NVM* qcvm, int num, const char* name, BuiltinFunction builtin)
+void nvmDestroyVM(NVM* qcvm)
 {
+	free(qcvm);
+}
+
+void nvmAddExtBuiltin(NVM* qcvm, int num, const char* name, BuiltinFunction builtin)
+{
+	if (!qcvm->progs)
+	{
+		Errorf(qcvm, "Trying to add extension builtin without loading progs\n");
+		return;
+	}
+
     if (num)
     {
         qcvm->builtins[num] = builtin;
@@ -260,6 +272,7 @@ void nvmAddBuiltin(NVM* qcvm, int num, const char* name, BuiltinFunction builtin
                 {	//okay, map it
                     qcvm->functions[i].first_statement = -(qcvm->auto_ext_builtin_number);
                     qcvm->builtins[qcvm->auto_ext_builtin_number] = builtin;
+					qcvm->auto_ext_builtin_number--;
                     break;
                 }
             }
@@ -486,6 +499,116 @@ static const char *pr_opnames[] =
 	"BITAND",
 	"BITOR"
 };
+
+#define	PR_STRING_ALLOCSLOTS	256
+
+static void PR_AllocStringSlots (NVM* qcvm)
+{
+	qcvm->maxknownstrings += PR_STRING_ALLOCSLOTS;
+	DPrintf(qcvm, "PR_AllocStringSlots: realloc'ing for %d slots\n", qcvm->maxknownstrings);
+	//qcvm->knownstrings = (const char **) Z_Realloc ((void *)qcvm->knownstrings, qcvm->maxknownstrings * sizeof(char *));
+	qcvm->knownstrings = (const char **) realloc ((void *)qcvm->knownstrings, qcvm->maxknownstrings * sizeof(char *));
+}
+
+static const char *PR_GetString (NVM* qcvm, int num)
+{
+	if (num >= 0 && num < qcvm->stringssize)
+		return qcvm->strings + num;
+	else if (num < 0 && num >= -qcvm->numknownstrings)
+	{
+		if (!qcvm->knownstrings[-1 - num])
+		{
+			Errorf (qcvm, "PR_GetString: attempt to get a non-existant string %d\n", num);
+			return "";
+		}
+		return qcvm->knownstrings[-1 - num];
+	}
+	else
+	{
+		return qcvm->strings;
+		Errorf(qcvm, "PR_GetString: invalid string offset %d\n", num);
+		return "";
+	}
+}
+
+const char* nvmGetString(NVM* vm, int str_ofs)
+{
+	return PR_GetString(vm, str_ofs);
+}
+
+static void PR_ClearEngineString(NVM* qcvm, int num)
+{
+	if (num < 0 && num >= -qcvm->numknownstrings)
+	{
+		num = -1 - num;
+		qcvm->knownstrings[num] = NULL;
+		if (qcvm->freeknownstrings > num)
+			qcvm->freeknownstrings = num;
+	}
+}
+
+static int PR_SetEngineString (NVM* qcvm, const char *s)
+{
+	int		i;
+
+	if (!s)
+		return 0;
+#if 0	/* can't: sv.model_precache & sv.sound_precache points to pr_strings */
+	if (s >= qcvm->strings && s <= qcvm->strings + qcvm->stringssize)
+		Host_Error("PR_SetEngineString: \"%s\" in pr_strings area\n", s);
+#else
+	if (s >= qcvm->strings && s <= qcvm->strings + qcvm->stringssize - 2)
+		return (int)(s - qcvm->strings);
+#endif
+	for (i = 0; i < qcvm->numknownstrings; i++)
+	{
+		if (qcvm->knownstrings[i] == s)
+			return -1 - i;
+	}
+	// new unknown engine string
+	//Con_DPrintf ("PR_SetEngineString: new engine string %p\n", s);
+	for (i = qcvm->freeknownstrings; ; i++)
+	{
+		if (i < qcvm->numknownstrings)
+		{
+			if (qcvm->knownstrings[i])
+				continue;
+		}
+		else
+		{
+			if (i >= qcvm->maxknownstrings)
+				PR_AllocStringSlots(qcvm);
+			qcvm->numknownstrings++;
+		}
+		break;
+	}
+	qcvm->freeknownstrings = i+1;
+	qcvm->knownstrings[i] = s;
+	return -1 - i;
+}
+
+static int PR_AllocString (NVM* qcvm, int size, char **ptr)
+{
+	int		i;
+
+	if (!size)
+		return 0;
+	for (i = 0; i < qcvm->numknownstrings; i++)
+	{
+		if (!qcvm->knownstrings[i])
+			break;
+	}
+//	if (i >= pr_numknownstrings)
+//	{
+		if (i >= qcvm->maxknownstrings)
+			PR_AllocStringSlots(qcvm);
+		qcvm->numknownstrings++;
+//	}
+	qcvm->knownstrings[i] = (char *)Hunk_AllocName(size, "string");
+	if (ptr)
+		*ptr = (char *) qcvm->knownstrings[i];
+	return -1 - i;
+}
 
 /*
 =================
