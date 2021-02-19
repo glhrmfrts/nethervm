@@ -402,6 +402,12 @@ bool nvmLoadProgs(NVM* qcvm, const char* filename, const char* data, size_t size
 	return true;
 }
 
+bool nvmAllocEdicts(NVM* qcvm, size_t count)
+{
+	qcvm->edicts = (edict_t *) qcvm->alloc_callback(qcvm, NULL, count*qcvm->edict_size, "edicts"); // ericw -- sv.edicts switched to use malloc()
+	return qcvm->edicts != NULL;
+}
+
 int nvmFindFunction(NVM* vm, const char* name)
 {
     dfunction_t* func = ED_FindFunction(vm, name);

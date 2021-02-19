@@ -12,18 +12,18 @@
 #define	EDICT_TO_PROG(e)	((byte *)e - (byte *)qcvm->edicts)
 #define PROG_TO_EDICT(e)	((edict_t *)((byte *)qcvm->edicts + e))
 
-#define	G_FLOAT(o)		(qcvm->globals[o])
-#define	G_INT(o)		(*(int *)&qcvm->globals[o])
-#define	G_EDICT(o)		((edict_t *)((byte *)qcvm->edicts+ *(int *)&qcvm->globals[o]))
+#define	G_FLOAT(o)		    (qcvm->globals[o])
+#define	G_INT(o)		    (*(int *)&qcvm->globals[o])
+#define	G_EDICT(o)		    ((edict_t *)((byte *)qcvm->edicts+ *(int *)&qcvm->globals[o]))
 #define G_EDICTNUM(o)		NUM_FOR_EDICT(G_EDICT(o))
-#define	G_VECTOR(o)		(&qcvm->globals[o])
-#define	G_STRING(o)		(nvmGetString(qcvm, *(string_t *)&qcvm->globals[o]))
+#define	G_VECTOR(o)		    (&qcvm->globals[o])
+#define	G_STRING(o)		    (nvmGetString(qcvm, *(string_t *)&qcvm->globals[o]))
 #define	G_FUNCTION(o)		(*(func_t *)&qcvm->globals[o])
 
 #define G_VECTORSET(r,x,y,z) do{G_FLOAT((r)+0) = x; G_FLOAT((r)+1) = y;G_FLOAT((r)+2) = z;}while(0)
 
 #define	E_FLOAT(e,o)		(((float*)&e->v)[o])
-#define	E_INT(e,o)		(*(int *)&((float*)&e->v)[o])
+#define	E_INT(e,o)		    (*(int *)&((float*)&e->v)[o])
 #define	E_VECTOR(e,o)		(&((float*)&e->v)[o])
 #define	E_STRING(e,o)		(nvmGetString(qcvm, *(string_t *)&((float*)&e->v)[o]))
 
@@ -35,7 +35,14 @@ typedef char byte;
 
 typedef void (*BuiltinFunction)(NVM* vm);
 
-typedef void*(*AllocCallback)(NVM* vm, size_t size, const char* name);
+/**
+ * AllocCallback will be used in 3 different ways:
+ * 
+ * AllocCallback(vm, NULL, size, name) -> Allocate, should return pointer to new memory.
+ * AllocCallback(vm, ptr, size, name) -> Reallocate, should reallocate memory at [ptr] and return pointer to new memory.
+ * AllocCallback(vm, ptr, 0, name) -> Free memory at [ptr], should return NULL.
+ */
+typedef void*(*AllocCallback)(NVM* vm, void* ptr, size_t size, const char* name);
 
 typedef void(*FreeCallback)(NVM* vm, void* ptr);
 
