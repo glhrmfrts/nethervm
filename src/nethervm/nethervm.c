@@ -83,6 +83,34 @@ static dfunction_t *ED_FindFunction (NVM* qcvm, const char *fn_name)
 	return NULL;
 }
 
+static ddef_t* ED_FindGlobal(NVM* qcvm, const char* name)
+{
+	ddef_t* def;
+	int		i;
+
+	for (i = 0; i < qcvm->progs->numglobaldefs; i++)
+	{
+		def = &qcvm->globaldefs[i];
+		if (!strcmp(PR_GetString(qcvm, def->s_name), name))
+			return def;
+	}
+	return NULL;
+}
+
+static ddef_t* ED_FindField(NVM* qcvm, const char* name)
+{
+	ddef_t* def;
+	int		i;
+
+	for (i = 0; i < qcvm->progs->numfielddefs; i++)
+	{
+		def = &qcvm->fielddefs[i];
+		if (!strcmp(PR_GetString(qcvm, def->s_name), name))
+			return def;
+	}
+	return NULL;
+}
+
 /*
 ============
 ED_GlobalAtOfs
@@ -230,16 +258,17 @@ static const char *PR_GlobalStringNoContents (NVM* qcvm, int ofs)
 	return line;
 }
 
-NVM* nvmCreateVM(AllocCallback acb, FreeCallback fcb, PrintCallback pcb, ErrorCallback ecb)
+NVM* nvmCreateVM(AllocCallback acb, PrintCallback pcb, ErrorCallback ecb, void* user_data)
 {
-    NVM* vm = (NVM*)malloc(sizeof(NVM));
+    NVM* vm = (NVM*)acb(NULL, NULL, sizeof(NVM), "NVM struct");
+	if (vm == NULL) { return NULL; }
     memset(vm, 0, sizeof(NVM));
     vm->alloc_callback = acb;
-    vm->free_callback = fcb;
     vm->print_callback = pcb;
     vm->error_callback = ecb;
     vm->auto_ext_builtin_number = MAX_BUILTINS - 1;
 	vm->numbuiltins = MAX_BUILTINS;
+	vm->user_data = user_data;
     return vm;
 }
 
@@ -383,11 +412,12 @@ bool nvmLoadProgs(NVM* qcvm, const char* filename, const char* data, size_t size
 	QCEXTFIELDS_SS
 #undef QCEXTFIELD
 
-	i = qcvm->progs->entityfields;
 	if (qcvm->extfields.emiteffectnum < 0)
 		qcvm->extfields.emiteffectnum = i++;
 	if (qcvm->extfields.traileffectnum < 0)
 		qcvm->extfields.traileffectnum = i++;*/
+
+	i = qcvm->progs->entityfields;
 
 	qcvm->edict_size = i * 4 + sizeof(edict_t) - sizeof(entvars_t);
 	// round off to next highest whole word address (esp for Alpha)
@@ -408,7 +438,29 @@ bool nvmAllocEdicts(NVM* qcvm, size_t count)
 	return qcvm->edicts != NULL;
 }
 
-int nvmFindFunction(NVM* vm, const char* name)
+global_t nvmFindGlobal(NVM* vm, const char* name)
+{
+	ddef_t* def = ED_FindGlobal(vm, name);
+	if (def) {
+		return def - vm->globaldefs;
+	}
+	else {
+		return -1;
+	}
+}
+
+field_t nvmFindField(NVM* vm, const char* name)
+{
+	ddef_t* def = ED_FindField(vm, name);
+	if (def) {
+		return def - vm->fielddefs;
+	}
+	else {
+		return -1;
+	}
+}
+
+func_t nvmFindFunction(NVM* vm, const char* name)
 {
     dfunction_t* func = ED_FindFunction(vm, name);
     if (func)
@@ -513,7 +565,9 @@ static void PR_AllocStringSlots (NVM* qcvm)
 	qcvm->maxknownstrings += PR_STRING_ALLOCSLOTS;
 	DPrintf(qcvm, "PR_AllocStringSlots: realloc'ing for %d slots\n", qcvm->maxknownstrings);
 	//qcvm->knownstrings = (const char **) Z_Realloc ((void *)qcvm->knownstrings, qcvm->maxknownstrings * sizeof(char *));
-	qcvm->knownstrings = (const char **) realloc ((void *)qcvm->knownstrings, qcvm->maxknownstrings * sizeof(char *));
+	qcvm->knownstrings = (const char **) qcvm->alloc_callback(
+		qcvm, (void *)qcvm->knownstrings, qcvm->maxknownstrings * sizeof(char *), "PR_AllocStringSlots"
+	);
 }
 
 static const char *PR_GetString (NVM* qcvm, int num)
@@ -804,7 +858,7 @@ void nvmExecuteFunction(NVM* qcvm, func_t fnum)
 
 	//FIXME: if this is a builtin, then we're going to crash.
 
-	qcvm->trace = false;
+	qcvm->trace = true;
 
 // make a stack frame
 	exitdepth = qcvm->depth;
@@ -814,272 +868,272 @@ void nvmExecuteFunction(NVM* qcvm, func_t fnum)
 
     while (1)
     {
-	st++;	/* next statement */
+		st++;	/* next statement */
 
-	if (++profile > 0x10000000)	//spike -- was decimal 100000
-	{
-		qcvm->xstatement = st - qcvm->statements;
-		PR_RunError(qcvm, "runaway loop error");
-	}
-
-	if (qcvm->trace)
-		PR_PrintStatement(qcvm, st);
-
-	switch (st->op)
-	{
-	case OP_ADD_F:
-		OPC->_float = OPA->_float + OPB->_float;
-		break;
-	case OP_ADD_V:
-		OPC->vector[0] = OPA->vector[0] + OPB->vector[0];
-		OPC->vector[1] = OPA->vector[1] + OPB->vector[1];
-		OPC->vector[2] = OPA->vector[2] + OPB->vector[2];
-		break;
-
-	case OP_SUB_F:
-		OPC->_float = OPA->_float - OPB->_float;
-		break;
-	case OP_SUB_V:
-		OPC->vector[0] = OPA->vector[0] - OPB->vector[0];
-		OPC->vector[1] = OPA->vector[1] - OPB->vector[1];
-		OPC->vector[2] = OPA->vector[2] - OPB->vector[2];
-		break;
-
-	case OP_MUL_F:
-		OPC->_float = OPA->_float * OPB->_float;
-		break;
-	case OP_MUL_V:
-		OPC->_float = OPA->vector[0] * OPB->vector[0] +
-			      OPA->vector[1] * OPB->vector[1] +
-			      OPA->vector[2] * OPB->vector[2];
-		break;
-	case OP_MUL_FV:
-		OPC->vector[0] = OPA->_float * OPB->vector[0];
-		OPC->vector[1] = OPA->_float * OPB->vector[1];
-		OPC->vector[2] = OPA->_float * OPB->vector[2];
-		break;
-	case OP_MUL_VF:
-		OPC->vector[0] = OPB->_float * OPA->vector[0];
-		OPC->vector[1] = OPB->_float * OPA->vector[1];
-		OPC->vector[2] = OPB->_float * OPA->vector[2];
-		break;
-
-	case OP_DIV_F:
-		OPC->_float = OPA->_float / OPB->_float;
-		break;
-
-	case OP_BITAND:
-		OPC->_float = (int)OPA->_float & (int)OPB->_float;
-		break;
-
-	case OP_BITOR:
-		OPC->_float = (int)OPA->_float | (int)OPB->_float;
-		break;
-
-	case OP_GE:
-		OPC->_float = OPA->_float >= OPB->_float;
-		break;
-	case OP_LE:
-		OPC->_float = OPA->_float <= OPB->_float;
-		break;
-	case OP_GT:
-		OPC->_float = OPA->_float > OPB->_float;
-		break;
-	case OP_LT:
-		OPC->_float = OPA->_float < OPB->_float;
-		break;
-	case OP_AND:
-		OPC->_float = OPA->_float && OPB->_float;
-		break;
-	case OP_OR:
-		OPC->_float = OPA->_float || OPB->_float;
-		break;
-
-	case OP_NOT_F:
-		OPC->_float = !OPA->_float;
-		break;
-	case OP_NOT_V:
-		OPC->_float = !OPA->vector[0] && !OPA->vector[1] && !OPA->vector[2];
-		break;
-	case OP_NOT_S:
-		OPC->_float = !OPA->string || !*PR_GetString(qcvm, OPA->string);
-		break;
-	case OP_NOT_FNC:
-		OPC->_float = !OPA->function;
-		break;
-	case OP_NOT_ENT:
-		OPC->_float = (PROG_TO_EDICT(OPA->edict) == qcvm->edicts);
-		break;
-
-	case OP_EQ_F:
-		OPC->_float = OPA->_float == OPB->_float;
-		break;
-	case OP_EQ_V:
-		OPC->_float = (OPA->vector[0] == OPB->vector[0]) &&
-			      (OPA->vector[1] == OPB->vector[1]) &&
-			      (OPA->vector[2] == OPB->vector[2]);
-		break;
-	case OP_EQ_S:
-		OPC->_float = !strcmp(PR_GetString(qcvm, OPA->string), PR_GetString(qcvm, OPB->string));
-		break;
-	case OP_EQ_E:
-		OPC->_float = OPA->_int == OPB->_int;
-		break;
-	case OP_EQ_FNC:
-		OPC->_float = OPA->function == OPB->function;
-		break;
-
-	case OP_NE_F:
-		OPC->_float = OPA->_float != OPB->_float;
-		break;
-	case OP_NE_V:
-		OPC->_float = (OPA->vector[0] != OPB->vector[0]) ||
-			      (OPA->vector[1] != OPB->vector[1]) ||
-			      (OPA->vector[2] != OPB->vector[2]);
-		break;
-	case OP_NE_S:
-		OPC->_float = strcmp(PR_GetString(qcvm, OPA->string), PR_GetString(qcvm, OPB->string));
-		break;
-	case OP_NE_E:
-		OPC->_float = OPA->_int != OPB->_int;
-		break;
-	case OP_NE_FNC:
-		OPC->_float = OPA->function != OPB->function;
-		break;
-
-	case OP_STORE_F:
-	case OP_STORE_ENT:
-	case OP_STORE_FLD:	// integers
-	case OP_STORE_S:
-	case OP_STORE_FNC:	// pointers
-		OPB->_int = OPA->_int;
-		break;
-	case OP_STORE_V:
-		OPB->vector[0] = OPA->vector[0];
-		OPB->vector[1] = OPA->vector[1];
-		OPB->vector[2] = OPA->vector[2];
-		break;
-
-	case OP_STOREP_F:
-	case OP_STOREP_ENT:
-	case OP_STOREP_FLD:	// integers
-	case OP_STOREP_S:
-	case OP_STOREP_FNC:	// pointers
-		ptr = (eval_t *)((byte *)qcvm->edicts + OPB->_int);
-		ptr->_int = OPA->_int;
-		break;
-	case OP_STOREP_V:
-		ptr = (eval_t *)((byte *)qcvm->edicts + OPB->_int);
-		ptr->vector[0] = OPA->vector[0];
-		ptr->vector[1] = OPA->vector[1];
-		ptr->vector[2] = OPA->vector[2];
-		break;
-
-	case OP_ADDRESS:
-		ed = PROG_TO_EDICT(OPA->edict);
-#ifdef PARANOID
-		NUM_FOR_EDICT(ed);	// Make sure it's in range
-#endif
-#if 0
-		if (ed == (edict_t *)qcvm->edicts && sv.state == ss_active)
+		if (++profile > 0x10000000)	//spike -- was decimal 100000
 		{
 			qcvm->xstatement = st - qcvm->statements;
-			PR_RunError("assignment to world entity");
+			PR_RunError(qcvm, "runaway loop error");
 		}
-#endif
-		OPC->_int = (byte *)((int *)&ed->v + OPB->_int) - (byte *)qcvm->edicts;
-		break;
 
-	case OP_LOAD_F:
-	case OP_LOAD_FLD:
-	case OP_LOAD_ENT:
-	case OP_LOAD_S:
-	case OP_LOAD_FNC:
-		ed = PROG_TO_EDICT(OPA->edict);
-#ifdef PARANOID
-		NUM_FOR_EDICT(ed);	// Make sure it's in range
-#endif
-		OPC->_int = ((eval_t *)((int *)&ed->v + OPB->_int))->_int;
-		break;
+		if (qcvm->trace)
+			PR_PrintStatement(qcvm, st);
 
-	case OP_LOAD_V:
-		ed = PROG_TO_EDICT(OPA->edict);
-#ifdef PARANOID
-		NUM_FOR_EDICT(ed);	// Make sure it's in range
-#endif
-		ptr = (eval_t *)((int *)&ed->v + OPB->_int);
-		OPC->vector[0] = ptr->vector[0];
-		OPC->vector[1] = ptr->vector[1];
-		OPC->vector[2] = ptr->vector[2];
-		break;
-
-	case OP_IFNOT:
-		if (!OPA->_int)
-			st += st->b - 1;	/* -1 to offset the st++ */
-		break;
-
-	case OP_IF:
-		if (OPA->_int)
-			st += st->b - 1;	/* -1 to offset the st++ */
-		break;
-
-	case OP_GOTO:
-		st += st->a - 1;		/* -1 to offset the st++ */
-		break;
-
-	case OP_CALL0:
-	case OP_CALL1:
-	case OP_CALL2:
-	case OP_CALL3:
-	case OP_CALL4:
-	case OP_CALL5:
-	case OP_CALL6:
-	case OP_CALL7:
-	case OP_CALL8:
-		qcvm->xfunction->profile += profile - startprofile;
-		startprofile = profile;
-		qcvm->xstatement = st - qcvm->statements;
-		qcvm->argc = st->op - OP_CALL0;
-		if (!OPA->function)
-			PR_RunError(qcvm, "NULL function");
-		newf = &qcvm->functions[OPA->function];
-		if (newf->first_statement < 0)
-		{ // Built-in function
-			int i = -newf->first_statement;
-			if (i >= qcvm->numbuiltins)
-				i = 0;	//just invoke the fixme builtin.
-			qcvm->builtins[i](qcvm);
+		switch (st->op)
+		{
+		case OP_ADD_F:
+			OPC->_float = OPA->_float + OPB->_float;
 			break;
-		}
-		// Normal function
-		st = &qcvm->statements[PR_EnterFunction(qcvm, newf)];
-		break;
+		case OP_ADD_V:
+			OPC->vector[0] = OPA->vector[0] + OPB->vector[0];
+			OPC->vector[1] = OPA->vector[1] + OPB->vector[1];
+			OPC->vector[2] = OPA->vector[2] + OPB->vector[2];
+			break;
 
-	case OP_DONE:
-	case OP_RETURN:
-		qcvm->xfunction->profile += profile - startprofile;
-		startprofile = profile;
-		qcvm->xstatement = st - qcvm->statements;
-		qcvm->globals[OFS_RETURN] = qcvm->globals[(unsigned short)st->a];
-		qcvm->globals[OFS_RETURN + 1] = qcvm->globals[(unsigned short)st->a + 1];
-		qcvm->globals[OFS_RETURN + 2] = qcvm->globals[(unsigned short)st->a + 2];
-		st = &qcvm->statements[PR_LeaveFunction(qcvm)];
-		if (qcvm->depth == exitdepth)
-		{ // Done
-			return;
-		}
-		break;
+		case OP_SUB_F:
+			OPC->_float = OPA->_float - OPB->_float;
+			break;
+		case OP_SUB_V:
+			OPC->vector[0] = OPA->vector[0] - OPB->vector[0];
+			OPC->vector[1] = OPA->vector[1] - OPB->vector[1];
+			OPC->vector[2] = OPA->vector[2] - OPB->vector[2];
+			break;
 
-	case OP_STATE:
-		ed = PROG_TO_EDICT(qcvm->global_struct->self);
-		ed->v.nextthink = qcvm->global_struct->time + 0.1;
-		ed->v.frame = OPA->_float;
-		ed->v.think = OPB->function;
-		break;
+		case OP_MUL_F:
+			OPC->_float = OPA->_float * OPB->_float;
+			break;
+		case OP_MUL_V:
+			OPC->_float = OPA->vector[0] * OPB->vector[0] +
+					  OPA->vector[1] * OPB->vector[1] +
+					  OPA->vector[2] * OPB->vector[2];
+			break;
+		case OP_MUL_FV:
+			OPC->vector[0] = OPA->_float * OPB->vector[0];
+			OPC->vector[1] = OPA->_float * OPB->vector[1];
+			OPC->vector[2] = OPA->_float * OPB->vector[2];
+			break;
+		case OP_MUL_VF:
+			OPC->vector[0] = OPB->_float * OPA->vector[0];
+			OPC->vector[1] = OPB->_float * OPA->vector[1];
+			OPC->vector[2] = OPB->_float * OPA->vector[2];
+			break;
 
-	default:
-		qcvm->xstatement = st - qcvm->statements;
-		PR_RunError(qcvm, "Bad opcode %i", st->op);
+		case OP_DIV_F:
+			OPC->_float = OPA->_float / OPB->_float;
+			break;
+
+		case OP_BITAND:
+			OPC->_float = (int)OPA->_float & (int)OPB->_float;
+			break;
+
+		case OP_BITOR:
+			OPC->_float = (int)OPA->_float | (int)OPB->_float;
+			break;
+
+		case OP_GE:
+			OPC->_float = OPA->_float >= OPB->_float;
+			break;
+		case OP_LE:
+			OPC->_float = OPA->_float <= OPB->_float;
+			break;
+		case OP_GT:
+			OPC->_float = OPA->_float > OPB->_float;
+			break;
+		case OP_LT:
+			OPC->_float = OPA->_float < OPB->_float;
+			break;
+		case OP_AND:
+			OPC->_float = OPA->_float && OPB->_float;
+			break;
+		case OP_OR:
+			OPC->_float = OPA->_float || OPB->_float;
+			break;
+
+		case OP_NOT_F:
+			OPC->_float = !OPA->_float;
+			break;
+		case OP_NOT_V:
+			OPC->_float = !OPA->vector[0] && !OPA->vector[1] && !OPA->vector[2];
+			break;
+		case OP_NOT_S:
+			OPC->_float = !OPA->string || !*PR_GetString(qcvm, OPA->string);
+			break;
+		case OP_NOT_FNC:
+			OPC->_float = !OPA->function;
+			break;
+		case OP_NOT_ENT:
+			OPC->_float = (PROG_TO_EDICT(OPA->edict) == qcvm->edicts);
+			break;
+
+		case OP_EQ_F:
+			OPC->_float = OPA->_float == OPB->_float;
+			break;
+		case OP_EQ_V:
+			OPC->_float = (OPA->vector[0] == OPB->vector[0]) &&
+					  (OPA->vector[1] == OPB->vector[1]) &&
+					  (OPA->vector[2] == OPB->vector[2]);
+			break;
+		case OP_EQ_S:
+			OPC->_float = !strcmp(PR_GetString(qcvm, OPA->string), PR_GetString(qcvm, OPB->string));
+			break;
+		case OP_EQ_E:
+			OPC->_float = OPA->_int == OPB->_int;
+			break;
+		case OP_EQ_FNC:
+			OPC->_float = OPA->function == OPB->function;
+			break;
+
+		case OP_NE_F:
+			OPC->_float = OPA->_float != OPB->_float;
+			break;
+		case OP_NE_V:
+			OPC->_float = (OPA->vector[0] != OPB->vector[0]) ||
+					  (OPA->vector[1] != OPB->vector[1]) ||
+					  (OPA->vector[2] != OPB->vector[2]);
+			break;
+		case OP_NE_S:
+			OPC->_float = strcmp(PR_GetString(qcvm, OPA->string), PR_GetString(qcvm, OPB->string));
+			break;
+		case OP_NE_E:
+			OPC->_float = OPA->_int != OPB->_int;
+			break;
+		case OP_NE_FNC:
+			OPC->_float = OPA->function != OPB->function;
+			break;
+
+		case OP_STORE_F:
+		case OP_STORE_ENT:
+		case OP_STORE_FLD:	// integers
+		case OP_STORE_S:
+		case OP_STORE_FNC:	// pointers
+			OPB->_int = OPA->_int;
+			break;
+		case OP_STORE_V:
+			OPB->vector[0] = OPA->vector[0];
+			OPB->vector[1] = OPA->vector[1];
+			OPB->vector[2] = OPA->vector[2];
+			break;
+
+		case OP_STOREP_F:
+		case OP_STOREP_ENT:
+		case OP_STOREP_FLD:	// integers
+		case OP_STOREP_S:
+		case OP_STOREP_FNC:	// pointers
+			ptr = (eval_t *)((byte *)qcvm->edicts + OPB->_int);
+			ptr->_int = OPA->_int;
+			break;
+		case OP_STOREP_V:
+			ptr = (eval_t *)((byte *)qcvm->edicts + OPB->_int);
+			ptr->vector[0] = OPA->vector[0];
+			ptr->vector[1] = OPA->vector[1];
+			ptr->vector[2] = OPA->vector[2];
+			break;
+
+		case OP_ADDRESS:
+			ed = PROG_TO_EDICT(OPA->edict);
+	#ifdef PARANOID
+			NUM_FOR_EDICT(ed);	// Make sure it's in range
+	#endif
+	#if 0
+			if (ed == (edict_t *)qcvm->edicts && sv.state == ss_active)
+			{
+				qcvm->xstatement = st - qcvm->statements;
+				PR_RunError("assignment to world entity");
+			}
+	#endif
+			OPC->_int = (byte *)((int *)&ed->v + OPB->_int) - (byte *)qcvm->edicts;
+			break;
+
+		case OP_LOAD_F:
+		case OP_LOAD_FLD:
+		case OP_LOAD_ENT:
+		case OP_LOAD_S:
+		case OP_LOAD_FNC:
+			ed = PROG_TO_EDICT(OPA->edict);
+	#ifdef PARANOID
+			NUM_FOR_EDICT(ed);	// Make sure it's in range
+	#endif
+			OPC->_int = ((eval_t *)((int *)&ed->v + OPB->_int))->_int;
+			break;
+
+		case OP_LOAD_V:
+			ed = PROG_TO_EDICT(OPA->edict);
+	#ifdef PARANOID
+			NUM_FOR_EDICT(ed);	// Make sure it's in range
+	#endif
+			ptr = (eval_t *)((int *)&ed->v + OPB->_int);
+			OPC->vector[0] = ptr->vector[0];
+			OPC->vector[1] = ptr->vector[1];
+			OPC->vector[2] = ptr->vector[2];
+			break;
+
+		case OP_IFNOT:
+			if (!OPA->_int)
+				st += st->b - 1;	/* -1 to offset the st++ */
+			break;
+
+		case OP_IF:
+			if (OPA->_int)
+				st += st->b - 1;	/* -1 to offset the st++ */
+			break;
+
+		case OP_GOTO:
+			st += st->a - 1;		/* -1 to offset the st++ */
+			break;
+
+		case OP_CALL0:
+		case OP_CALL1:
+		case OP_CALL2:
+		case OP_CALL3:
+		case OP_CALL4:
+		case OP_CALL5:
+		case OP_CALL6:
+		case OP_CALL7:
+		case OP_CALL8:
+			qcvm->xfunction->profile += profile - startprofile;
+			startprofile = profile;
+			qcvm->xstatement = st - qcvm->statements;
+			qcvm->argc = st->op - OP_CALL0;
+			if (!OPA->function)
+				PR_RunError(qcvm, "NULL function");
+			newf = &qcvm->functions[OPA->function];
+			if (newf->first_statement < 0)
+			{ // Built-in function
+				int i = -newf->first_statement;
+				if (i >= qcvm->numbuiltins)
+					i = 0;	//just invoke the fixme builtin.
+				qcvm->builtins[i](qcvm);
+				break;
+			}
+			// Normal function
+			st = &qcvm->statements[PR_EnterFunction(qcvm, newf)];
+			break;
+
+		case OP_DONE:
+		case OP_RETURN:
+			qcvm->xfunction->profile += profile - startprofile;
+			startprofile = profile;
+			qcvm->xstatement = st - qcvm->statements;
+			qcvm->globals[OFS_RETURN] = qcvm->globals[(unsigned short)st->a];
+			qcvm->globals[OFS_RETURN + 1] = qcvm->globals[(unsigned short)st->a + 1];
+			qcvm->globals[OFS_RETURN + 2] = qcvm->globals[(unsigned short)st->a + 2];
+			st = &qcvm->statements[PR_LeaveFunction(qcvm)];
+			if (qcvm->depth == exitdepth)
+			{ // Done
+				return;
+			}
+			break;
+
+		case OP_STATE:
+			ed = PROG_TO_EDICT(qcvm->global_struct->self);
+			ed->v.nextthink = qcvm->global_struct->time + 0.1;
+			ed->v.frame = OPA->_float;
+			ed->v.think = OPB->function;
+			break;
+
+		default:
+			qcvm->xstatement = st - qcvm->statements;
+			PR_RunError(qcvm, "Bad opcode %i", st->op);
 	}
     }	/* end of while(1) loop */
 }

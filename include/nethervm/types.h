@@ -41,10 +41,10 @@ typedef void (*BuiltinFunction)(NVM* vm);
  * AllocCallback(vm, NULL, size, name) -> Allocate, should return pointer to new memory.
  * AllocCallback(vm, ptr, size, name) -> Reallocate, should reallocate memory at [ptr] and return pointer to new memory.
  * AllocCallback(vm, ptr, 0, name) -> Free memory at [ptr], should return NULL.
+ * 
+ * The 'vm' can be NULL for the first allocation, which allocates the NVM struct itself.
  */
 typedef void*(*AllocCallback)(NVM* vm, void* ptr, size_t size, const char* name);
-
-typedef void(*FreeCallback)(NVM* vm, void* ptr);
 
 typedef void(*PrintCallback)(NVM* vm, const char* msg, bool debug);
 
@@ -163,7 +163,6 @@ typedef struct NVM_s
 
     globalvars_t* global_struct;
     AllocCallback alloc_callback;
-    FreeCallback  free_callback;
     ErrorCallback error_callback;
     PrintCallback print_callback;
     int auto_ext_builtin_number;

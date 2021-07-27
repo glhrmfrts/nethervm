@@ -3,7 +3,7 @@
 
 #include "types.h"
 
-NVM* nvmCreateVM(AllocCallback acb, PrintCallback pcb, ErrorCallback ecb);
+NVM* nvmCreateVM(AllocCallback acb, PrintCallback pcb, ErrorCallback ecb, void* user_data);
 
 void nvmDestroyVM(NVM* vm);
 
@@ -15,14 +15,14 @@ bool nvmLoadProgs(NVM* vm, const char* filename, const char* data, size_t size, 
 
 bool nvmAllocEdicts(NVM* vm, size_t count);
 
-int nvmFindFunction(NVM* vm, const char* name);
+func_t nvmFindFunction(NVM* vm, const char* name);
 
-int nvmFindGlobal(NVM* vm, const char* name);
+global_t nvmFindGlobal(NVM* vm, const char* name);
 
-int nvmFindField(NVM* vm, const char* name);
+field_t nvmFindField(NVM* vm, const char* name);
 
 const char* nvmGetString(NVM* vm, int str_ofs);
 
-void nvmExecuteFunction(NVM* vm, int func_ofs);
+void nvmExecuteFunction(NVM* vm, func_t func_ofs);
 
 #endif

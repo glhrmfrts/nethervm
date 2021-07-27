@@ -20,9 +20,26 @@ static void builtin_print(NVM* qcvm)
     printf("%s\n", msg);
 }
 
+static void* alloc_callback(NVM* vm, void* oldptr, size_t size, const char* name)
+{
+    if (oldptr == NULL) {
+        printf("Allocating %zu bytes for '%s'\n", size, name);
+        return malloc(size);
+    }
+    else if (size > 0) {
+        printf("Re-allocating %zu bytes for '%s'\n", size, name);
+        return realloc(oldptr, size);
+    }
+    else {
+        printf("Freeing %zu bytes for '%s'\n", size, name);
+        free(oldptr);
+        return NULL;
+    }
+}
+
 static void print_callback(NVM* vm, const char* msg, bool debug)
 {
-    printf(msg);
+    printf("%s", msg);
 }
 
 static void error_callback(NVM* vm, const char* msg)
@@ -60,7 +77,7 @@ int main(int argc, char** argv)
     size_t progs_size = 0;
     if (!ReadFile(progs_filename, &progs_data, &progs_size)) return 1;
 
-    vm = nvmCreateVM(NULL, NULL, print_callback, error_callback);
+    vm = nvmCreateVM(alloc_callback, print_callback, error_callback, NULL);
     if (nvmLoadProgs(vm, progs_filename, progs_data, progs_size, true))
     {
         nvmAddExtBuiltin(vm, 0, "counter_increase", builtin_counter_increase);
